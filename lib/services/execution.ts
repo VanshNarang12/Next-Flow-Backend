@@ -262,7 +262,7 @@ export async function handleNodeComplete(secret: string | null, body: any) {
         if (output) nodeOutputs[nodeId] = output
 
         const resolvedIds = new Set([
-            ...run.nodeExecutions.filter((e) => e.status === 'success').map((e) => e.nodeId),
+            ...run.nodeExecutions.filter((e: { status: string; nodeId: string }) => e.status === 'success').map((e) => e.nodeId),
             nodeId,
         ])
 
