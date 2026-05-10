@@ -310,21 +310,22 @@ export async function handleNodeComplete(secret: string | null, body: any) {
         )
     }
 
+    type ExecSummary = { status: string; output: Prisma.JsonValue | null; nodeType: string }
     const allExecutions = await prisma.nodeExecution.findMany({
         where: { runId },
         select: { status: true, output: true, nodeType: true },
-    })
+    }) as ExecSummary[]
 
-    const allDone = allExecutions.every((e) =>
+    const allDone = allExecutions.every((e: ExecSummary) =>
         ['success', 'failed', 'skipped'].includes(e.status)
     )
 
     if (allDone) {
-        const hasFailed = allExecutions.some((e) => e.status === 'failed')
-        const hasSuccess = allExecutions.some((e) => e.status === 'success')
+        const hasFailed = allExecutions.some((e: ExecSummary) => e.status === 'failed')
+        const hasSuccess = allExecutions.some((e: ExecSummary) => e.status === 'success')
         const finalStatus = hasFailed && hasSuccess ? 'partial' : hasFailed ? 'failed' : 'success'
 
-        const responseExec = allExecutions.find((e) => e.nodeType === 'response')
+        const responseExec = allExecutions.find((e: ExecSummary) => e.nodeType === 'response')
         const finalResult = responseExec?.output ?? null
 
         await prisma.workflowRun.update({
