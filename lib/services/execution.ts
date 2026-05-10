@@ -261,10 +261,11 @@ export async function handleNodeComplete(secret: string | null, body: any) {
         }
         if (output) nodeOutputs[nodeId] = output
 
-        const resolvedIds = new Set([
-            ...run.nodeExecutions.filter((e: { status: string; nodeId: string }) => e.status === 'success').map((e: { nodeId: string }) => e.nodeId),
-            nodeId,
-        ])
+        const successNodeIds: string[] = []
+        for (const exec of run.nodeExecutions) {
+            if (exec.status === 'success') successNodeIds.push(exec.nodeId)
+        }
+        const resolvedIds = new Set([...successNodeIds, nodeId])
 
         const downstream = [...(dependents.get(nodeId) ?? [])].filter((id) =>
             run.includedNodeIds.includes(id)
