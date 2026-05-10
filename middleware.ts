@@ -1,7 +1,6 @@
-import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server'
+import { clerkMiddleware } from '@clerk/nextjs/server'
 import { NextResponse } from 'next/server'
 
-const isPublicRoute = createRouteMatcher(['/api/internal/(.*)', '/api/health'])
 
 const ALLOWED_ORIGINS = [
   'http://localhost:3000',
@@ -25,10 +24,6 @@ export default clerkMiddleware(async (auth, request) => {
 
   if (request.method === 'OPTIONS') {
     return new NextResponse(null, { status: 204, headers: cors })
-  }
-
-  if (!isPublicRoute(request)) {
-    await auth.protect()
   }
 
   const res = NextResponse.next()
