@@ -1,7 +1,7 @@
 import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server'
 import { NextResponse } from 'next/server'
 
-const isPublicRoute = createRouteMatcher(['/api/internal/(.*)'])
+const isPublicRoute = createRouteMatcher(['/api/internal/(.*)', '/api/health'])
 
 const ALLOWED_ORIGINS = [
   'http://localhost:3000',
