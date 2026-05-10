@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { tasks } from '@trigger.dev/sdk/v3'
 import { prisma } from '@/lib/db'
+import { Prisma } from '@prisma/client'
 import crypto from 'crypto'
 import {
     buildDependencyMaps,
@@ -63,7 +64,7 @@ export async function triggerRun(workflowId: string, userId: string, body: any) 
 
     const scopedNodes = allNodes.filter((n) => scopedNodeIds.includes(n.id))
 
-    const run = await prisma.$transaction(async (tx) => {
+    const run = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
         const count = await tx.workflowRun.count({ where: { workflowId } })
         return tx.workflowRun.create({
             data: {
