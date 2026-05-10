@@ -1,7 +1,7 @@
 import { z } from 'zod'
+import { Prisma } from '@prisma/client'
 import { tasks } from '@trigger.dev/sdk/v3'
 import { prisma } from '@/lib/db'
-import { Prisma } from '@prisma/client'
 import crypto from 'crypto'
 import {
     buildDependencyMaps,
@@ -310,7 +310,7 @@ export async function handleNodeComplete(secret: string | null, body: any) {
         )
     }
 
-    type ExecSummary = { status: string; output: Prisma.JsonValue | null; nodeType: string }
+    type ExecSummary = { status: string; output: unknown; nodeType: string }
     const allExecutions = await prisma.nodeExecution.findMany({
         where: { runId },
         select: { status: true, output: true, nodeType: true },
