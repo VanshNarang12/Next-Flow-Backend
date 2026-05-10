@@ -29,8 +29,6 @@ export default clerkMiddleware(async (auth, request) => {
   const res = NextResponse.next()
   Object.entries(cors).forEach(([k, v]) => res.headers.set(k, v))
   return res
-}, {
-  authorizedParties: ['http://localhost:3000', 'https://next-flow-frontend.vercel.app'],
 })
 
 export const config = {
