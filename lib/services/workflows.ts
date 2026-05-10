@@ -1,5 +1,4 @@
 import { prisma } from '@/lib/db'
-import { Prisma } from '@prisma/client'
 import { z } from 'zod'
 import { buildDependencyMaps, hasCycle, type AnyNode, type AnyEdge } from '@/lib/dag'
 
@@ -59,8 +58,9 @@ export async function listWorkflows(userId: string) {
         },
     })
 
+    type WorkflowItem = { id: string; name: string; createdAt: Date; updatedAt: Date; runs: { status: string }[] }
     return {
-        data: workflows.map((w) => ({
+        data: (workflows as WorkflowItem[]).map((w) => ({
             id: w.id,
             name: w.name,
             createdAt: w.createdAt,
@@ -142,8 +142,10 @@ export async function updateWorkflow(id: string, userId: string, body: any) {
         where: { id },
         data: {
             ...(parsed.data.name && { name: parsed.data.name }),
-            ...(parsed.data.nodes !== undefined && { nodes: parsed.data.nodes as Prisma.JsonArray }),
-            ...(parsed.data.edges !== undefined && { edges: parsed.data.edges as Prisma.JsonArray }),
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            ...(parsed.data.nodes !== undefined && { nodes: parsed.data.nodes as any }),
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            ...(parsed.data.edges !== undefined && { edges: parsed.data.edges as any }),
         },
         select: { id: true, updatedAt: true },
     })
