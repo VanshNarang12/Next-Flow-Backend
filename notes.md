@@ -54,3 +54,9 @@ Answer: When the user clicks "Run", the frontend opens an SSE connection to GET 
  
   SSE is simpler — it's one-directional (server → browser only), works over regular HTTP, and the browser reconnects automatically if the
    connection drops. For our use case we only need server → browser updates, so SSE is sufficient.
+
+
+
+
+
+   npx trigger.dev@latest dev, npm run build, npm run dev
