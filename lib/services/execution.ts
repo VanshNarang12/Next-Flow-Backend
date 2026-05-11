@@ -236,7 +236,7 @@ export async function handleNodeComplete(secret: string | null, body: any) {
     broadcastToWorkflow(
         workflowId,
         status === 'success' ? 'node-complete' : 'node-failed',
-        { nodeId, status, output, durationMs, runId }
+        { nodeId, status, output, durationMs, runId, error }
     )
 
     if (status === 'failed') {
