@@ -22,6 +22,14 @@ const runSchema = z.discriminatedUnion('scope', [
     z.object({ scope: z.literal('partial'), nodeIds: z.array(z.string()).min(1) }),
 ])
 
+function buildTaskPayload(nodeType: string, resolvedInputs: Record<string, unknown>): Record<string, unknown> {
+    if (nodeType === 'cropImage') {
+        const { inputImage, width, height, x, y, ...rest } = resolvedInputs
+        return { ...rest, imageUrl: inputImage, w: width, h: height, x, y }
+    }
+    return resolvedInputs
+}
+
 const NODE_TYPE_MAP: Record<string, 'request_inputs' | 'crop_image' | 'gemini' | 'response'> = {
     requestInputs: 'request_inputs',
     cropImage: 'crop_image',
@@ -87,27 +95,29 @@ export async function triggerRun(workflowId: string, userId: string, body: any) 
         })
     })
 
-    const requestInputsNode = scopedNodes.find((n) => n.type === 'requestInputs')
+    const requestInputsNodes = scopedNodes.filter((n) => n.type === 'requestInputs')
     const nodeOutputs: Record<string, Record<string, unknown>> = {}
 
-    if (requestInputsNode) {
-        const fields = (requestInputsNode.data.fields as Array<{ id: string; value: unknown }>) ?? []
-        const output = Object.fromEntries(fields.map((f) => [f.id, f.value]))
-        nodeOutputs[requestInputsNode.id] = output
+    await Promise.all(
+        requestInputsNodes.map(async (requestInputsNode) => {
+            const fields = (requestInputsNode.data.fields as Array<{ id: string; value: unknown }>) ?? []
+            const output = Object.fromEntries(fields.map((f) => [`field-${f.id}`, f.value]))
+            nodeOutputs[requestInputsNode.id] = output
 
-        await prisma.nodeExecution.updateMany({
-            where: { runId: run.id, nodeId: requestInputsNode.id },
-            data: {
-                status: 'success',
-                inputsUsed: {},
-                output: output as object,
-                completedAt: new Date(),
-                durationMs: 0,
-            },
+            await prisma.nodeExecution.updateMany({
+                where: { runId: run.id, nodeId: requestInputsNode.id },
+                data: {
+                    status: 'success',
+                    inputsUsed: {},
+                    output: output as object,
+                    completedAt: new Date(),
+                    durationMs: 0,
+                },
+            })
         })
-    }
+    )
 
-    const resolvedIds = new Set(requestInputsNode ? [requestInputsNode.id] : [])
+    const resolvedIds = new Set(requestInputsNodes.map((n) => n.id))
     const candidates = scopedNodes
         .filter((n) => n.type !== 'requestInputs' && n.type !== 'response')
         .map((n) => n.id)
@@ -117,7 +127,7 @@ export async function triggerRun(workflowId: string, userId: string, body: any) 
     await Promise.all(
         toTrigger.map(async (nodeId) => {
             const node = scopedNodes.find((n) => n.id === nodeId)!
-            const resolvedInputs = resolveNodeInputs(node, nodeOutputs)
+            const resolvedInputs = resolveNodeInputs(node, nodeOutputs, allEdges)
 
             await prisma.nodeExecution.updateMany({
                 where: { runId: run.id, nodeId },
@@ -126,7 +136,7 @@ export async function triggerRun(workflowId: string, userId: string, body: any) 
 
             const taskName = node.type === 'cropImage' ? 'crop-image' : 'run-gemini'
             await tasks.trigger(taskName, {
-                ...resolvedInputs,
+                ...buildTaskPayload(node.type, resolvedInputs),
                 ...(node.type === 'gemini' && {
                     model: node.data.model,
                     settings: node.data.settings,
@@ -175,6 +185,7 @@ export async function handleNodeStatus(secret: string | null, body: any) {
         broadcastToWorkflow(run.workflowId, 'node-status', { nodeId, status, runId })
     }
 
+    return { data: { ok: true }, status: 200 }
 }
 
 export async function handleNodeComplete(secret: string | null, body: any) {
@@ -214,19 +225,6 @@ export async function handleNodeComplete(secret: string | null, body: any) {
         return { data: { ok: true }, status: 200 }
     }
 
-    const workflow = await prisma.workflow.findUnique({
-        where: {
-            id: run.workflow.id
-        }
-    })
-
-    if(!workflow) {
-        return {
-            data: { error: 'Workflow Not found' }, status: 500 
-        }
-    }
-
-
     const allNodes = run.workflow.nodes as AnyNode[]
     const allEdges = run.workflow.edges as AnyEdge[]
     const { deps, dependents } = buildDependencyMaps(allEdges)
@@ -248,6 +246,40 @@ export async function handleNodeComplete(secret: string | null, body: any) {
             })
             for (const skippedId of toSkip) {
                 broadcastToWorkflow(workflowId, 'node-failed', { nodeId: skippedId, status: 'skipped', runId })
+            }
+        }
+
+        // Propagate: any pending node whose dep is already failed/skipped can never run.
+        // Loop until stable in case of multi-hop chains not reachable from the current failed node.
+        let propagating = true
+        while (propagating) {
+            propagating = false
+            const execStatuses = await prisma.nodeExecution.findMany({
+                where: { runId },
+                select: { nodeId: true, status: true },
+            })
+            const statusMap = new Map(execStatuses.map((e) => [e.nodeId, e.status]))
+
+            const blocked = execStatuses
+                .filter((e) => e.status === 'pending')
+                .map((e) => e.nodeId)
+                .filter((id) => {
+                    const nodeDeps = deps.get(id) ?? new Set()
+                    return [...nodeDeps].some((dep) => {
+                        const s = statusMap.get(dep)
+                        return s === 'failed' || s === 'skipped'
+                    })
+                })
+
+            if (blocked.length > 0) {
+                await prisma.nodeExecution.updateMany({
+                    where: { runId, nodeId: { in: blocked }, status: 'pending' },
+                    data: { status: 'skipped' },
+                })
+                for (const skippedId of blocked) {
+                    broadcastToWorkflow(workflowId, 'node-failed', { nodeId: skippedId, status: 'skipped', runId })
+                }
+                propagating = true
             }
         }
     }
@@ -277,18 +309,30 @@ export async function handleNodeComplete(secret: string | null, body: any) {
                 const node = allNodes.find((n) => n.id === nextNodeId)
                 if (!node) return
 
-                const resolvedInputs = resolveNodeInputs(node, nodeOutputs)
+                const resolvedInputs = resolveNodeInputs(node, nodeOutputs, allEdges)
 
                 if (node.type === 'response') {
+                    // Resolve directly from incoming edges — bypasses key mismatch in node.data.inputs
+                    const incomingEdges = allEdges.filter((e) => e.target === node.id)
+                    let inputValue: unknown = null
+                    for (const edge of incomingEdges) {
+                        const val = (nodeOutputs[edge.source] ?? {})[edge.sourceHandle]
+                        if (val != null) { inputValue = val; break }
+                    }
+
                     await prisma.nodeExecution.updateMany({
                         where: { runId, nodeId: nextNodeId },
                         data: {
                             status: 'success',
                             inputsUsed: resolvedInputs as object,
-                            output: { result: resolvedInputs.result } as object,
+                            output: { result: inputValue } as object,
                             completedAt: new Date(),
                             durationMs: 0,
                         },
+                    })
+
+                    broadcastToWorkflow(workflowId, 'node-complete', {
+                        nodeId: nextNodeId, status: 'success', output: { result: inputValue }, runId,
                     })
                     return
                 }
@@ -300,7 +344,7 @@ export async function handleNodeComplete(secret: string | null, body: any) {
 
                 const taskName = node.type === 'cropImage' ? 'crop-image' : 'run-gemini'
                 await tasks.trigger(taskName, {
-                    ...resolvedInputs,
+                    ...buildTaskPayload(node.type, resolvedInputs),
                     ...(node.type === 'gemini' && { model: node.data.model, settings: node.data.settings }),
                     runId,
                     nodeId: nextNodeId,

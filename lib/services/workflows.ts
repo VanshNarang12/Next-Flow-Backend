@@ -28,7 +28,7 @@ const DEFAULT_NODES = [
             label: 'Response',
             deletable: false,
             inputs: {
-                result: { value: null, connectedFrom: null },
+                input: { value: null, connectedFrom: null },
             },
             status: 'idle',
         },

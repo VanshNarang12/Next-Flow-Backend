@@ -86,22 +86,50 @@ type InputDef =
 
 export function resolveNodeInputs(
   node: AnyNode,
-  nodeOutputs: Record<string, Record<string, unknown>>
+  nodeOutputs: Record<string, Record<string, unknown>>,
+  edges: AnyEdge[] = []
 ): Record<string, unknown> {
   const resolved: Record<string, unknown> = {}
   const inputs = (node.data.inputs ?? {}) as Record<string, InputDef>
 
+  // Build edge-based connection lookup: targetHandle → { nodeId, handleId }
+  const edgeMap = new Map<string, { nodeId: string; handleId: string }>()
+  const visionEdges: AnyEdge[] = []
+  for (const edge of edges) {
+    if (edge.target !== node.id) continue
+    if (edge.targetHandle?.startsWith('visionImages-')) {
+      visionEdges.push(edge)
+    } else {
+      edgeMap.set(edge.targetHandle, { nodeId: edge.source, handleId: edge.sourceHandle })
+    }
+  }
+
   for (const [key, def] of Object.entries(inputs)) {
-    if (key === 'visionImages' && Array.isArray(def)) {
-      resolved.visionImages = def.map((entry) => {
-        const { nodeId, handleId } = entry.connectedFrom
-        return (nodeOutputs[nodeId] ?? {})[handleId]
-      })
+    if (key === 'visionImages') {
+      // Prefer edge-derived connections, fall back to stored connectedFrom array
+      if (visionEdges.length > 0) {
+        visionEdges.sort((a, b) => {
+          const ai = parseInt(a.targetHandle.replace('visionImages-', ''), 10)
+          const bi = parseInt(b.targetHandle.replace('visionImages-', ''), 10)
+          return ai - bi
+        })
+        resolved.visionImages = visionEdges.map((e) => (nodeOutputs[e.source] ?? {})[e.sourceHandle])
+      } else if (Array.isArray(def)) {
+        resolved.visionImages = def.map((entry) => {
+          const { nodeId, handleId } = entry.connectedFrom
+          return (nodeOutputs[nodeId] ?? {})[handleId]
+        })
+      }
       continue
     }
 
     const scalar = def as { value: unknown; connectedFrom: { nodeId: string; handleId: string } | null }
-    if (scalar.connectedFrom) {
+
+    // Edges are the source of truth for connections
+    const edgeConn = edgeMap.get(key)
+    if (edgeConn) {
+      resolved[key] = (nodeOutputs[edgeConn.nodeId] ?? {})[edgeConn.handleId]
+    } else if (scalar.connectedFrom) {
       const { nodeId, handleId } = scalar.connectedFrom
       resolved[key] = (nodeOutputs[nodeId] ?? {})[handleId]
     } else {
