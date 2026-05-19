@@ -13,7 +13,7 @@ export const runGeminiTask = task({
         runId: string
         nodeId: string
         workflowId: string
-    }) => {
+    }, { ctx }: { ctx: { run: { id: string } } }) => {
         const startedAt = Date.now()
         const baseUrl = process.env.APP_URL!
         const secret = process.env.TRIGGER_INTERNAL_SECRET!
@@ -67,6 +67,7 @@ export const runGeminiTask = task({
                     status: 'success',
                     output: { response: responseText },
                     durationMs,
+                    triggerDevRunId: ctx.run.id,
                 }),
             })
 
@@ -82,6 +83,7 @@ export const runGeminiTask = task({
                     status: 'failed',
                     error: err?.message ?? 'Unknown error',
                     durationMs: Date.now() - startedAt,
+                    triggerDevRunId: ctx.run.id,
                 }),
             })
             throw err
